@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "mv"))
 
 from ttymv import analyze as A                       # noqa: E402
 from ttymv import scenes as S                        # noqa: E402
+from ttymv import tears as TEARS                     # noqa: E402
 from ttymv.canvas import Canvas, DEFAULT             # noqa: E402
 from ttymv import font as _font                       # noqa: E402
 from ttymv import motifs as MO                        # noqa: E402
@@ -24,6 +25,7 @@ from ttymv import motifs as MO                        # noqa: E402
 font = _font
 from ttymv.lrc import Lyrics                         # noqa: E402
 import re as _re                                     # noqa: E402
+import numpy as np                                   # noqa: E402
 _stutter_re = _re.compile(r"[A-Za-z]-[A-Za-z]")
 
 MOTIF_COUNT = len(MO.NAMES)
@@ -229,6 +231,78 @@ def _music_offset() -> None:
     check("the CLI default is the MUSIC_OFFSET constant",
           abs(args.offset - P.MUSIC_OFFSET) < 1e-9,
           f"{args.offset} vs {P.MUSIC_OFFSET}")
+
+
+def _tear_timeline() -> None:
+    """The tear schedule is internal, calibrated, and independent of the files.
+
+    Three things are worth asserting and each of them was broken at some
+    point: that the schedule is self-consistent against the piece's own act
+    table, that it is the same whether a track was measured or not, and that
+    nothing on the tear path reads the analysis any more.
+    """
+    from ttymv import shots as SH
+
+    print("tear timeline")
+    for name, ok, detail in TEARS.calibrate():
+        check(name, ok, detail)
+
+    # the whole schedule is one table, reachable from one place
+    check("the schedule lives in one module",
+          S.TEAR_EVENTS is TEARS.EVENTS and S.RESET_EVENTS is TEARS.RESETS
+          and SH.STUTTER_TIMES is TEARS.STUTTERS)
+
+    # and it does not move when the analysis does
+    measured, _d = load_score(fps=50.0)
+    a1 = Audio(_d, offset=0.0)
+    a2 = Audio(A.stand_in(fps=50.0), offset=0.0)
+    worst = 0.0
+    for k in range(420):
+        t = k * 0.5
+        act = S.act_at(t)
+        worst = max(worst, abs(TEARS.glitch(t, act) - TEARS.glitch(t, act)))
+    check("the tear level is a function of time alone", worst == 0.0)
+
+    def curve(a) -> list[float]:
+        sc = Show(a, color="true", fps=30.0)
+        out = []
+        for k in range(0, 420):
+            out.append(round(float(sc.context(k * 0.5, 80, 24, 1 / 30,
+                                              k * 15).glitch), 6))
+        return out
+
+    c1, c2 = curve(a1), curve(a2)
+    same = sum(1 for x, y in zip(c1, c2) if x == y)
+    check("a measured track and the stand-in tear identically",
+          same == len(c1), f"{same}/{len(c1)} samples agree")
+
+    # Nothing on the tear path may consult the analysis.  Asked of the tree
+    # rather than of the text: a substring search here matches the word
+    # "audio" in a docstring and says nothing about what the code touches.
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(TEARS))
+    runtime = {"level", "stutter_level", "glitch", "reset_level"}
+    banned = {"bands", "flux", "rms", "centroid", "low", "mid", "high",
+              "gaps", "onsets", "novelty", "wave", "section_index",
+              "index", "audio", "Audio", "load"}
+    touched = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name not in runtime:
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name):
+                touched.add(sub.id)
+            elif isinstance(sub, ast.Attribute):
+                touched.add(sub.attr)
+            elif isinstance(sub, ast.ImportFrom):
+                touched.add(sub.module or "")
+    used = sorted(touched & banned)
+    check("the tear functions touch no analysis data", not used, str(used))
+    check("and they import nothing to get at any",
+          not any("analyze" in (n.module or "") for n in ast.walk(tree)
+                  if isinstance(n, ast.ImportFrom)
+                  and n.col_offset == 0), "")
 
 
 def _raises(fn, *args) -> bool:
@@ -622,7 +696,7 @@ def main() -> int:
 
     # short: this is a clipped syllable, not a failing machine
     from ttymv.analyze import load as _load
-    g = audio.gap_tear
+    g = np.array([TEARS.stutter_level(t / 50.0) for t in range(audio.n)])
     nz = [i for i, v in enumerate(g) if v > 0]
     runs = []
     for i in nz:
@@ -646,16 +720,21 @@ def main() -> int:
 
     # And it must actually move the frame, not just compute a number.
     def rows_with(t, level):
+        # Patch the function the renderer actually calls.  This used to patch
+        # scenes.tear_level, which stopped being on the path the moment the
+        # schedule moved into tears.py -- and because a check that fails to
+        # patch still runs, it reported "no displacement" rather than "my
+        # patch missed", which is the more confusing of the two.
         sh = _Show(audio, color="true", fps=30)
-        orig = _SS.tear_level
+        orig = TEARS.glitch
         if level is not None:
-            _SS.tear_level = lambda *_a, **_k: level
+            TEARS.glitch = lambda *_a, **_k: level
         w = t - 1.6
         while w < t:
             sh.frame(w, 120, 36, 1 / 30, int(w * 30))
             w += 1 / 30
         out = sh.frame(t, 120, 36, 1 / 30, int(t * 30)).render_plain().split("\n")
-        _SS.tear_level = orig
+        TEARS.glitch = orig
         return out, sh.glitch
 
     for t, label in [(120.0, "the verdict"), (150.4, "an execution")]:
@@ -1058,6 +1137,7 @@ def main() -> int:
     _mark_vocabulary()
     _stand_in()
     _music_offset()
+    _tear_timeline()
 
     print()
     if skipped:

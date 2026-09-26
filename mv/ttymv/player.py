@@ -22,6 +22,7 @@ import numpy as np
 
 from . import analyze as A
 from . import scenes as S
+from . import tears as TEARS
 from . import shots as SH
 from .caps import Caps
 from .canvas import Canvas, DEFAULT, mix, rgb, str_width, truncate
@@ -351,7 +352,6 @@ class Audio:
         self.low = self._norm(data["low"])
         self.mid = self._norm(data["mid"])
         self.high = self._norm(data["high"])
-        self.gap_tear = self._gap_tear(data)
 
         self._bass_idx = slice(0, max(1, self.bands.shape[1] // 8))
         self.bass = self.bands[:, self._bass_idx].mean(axis=1)
@@ -366,39 +366,6 @@ class Audio:
         if hi - lo < 1e-4:
             return np.zeros_like(v)
         return np.clip((v - lo) / (hi - lo), 0.0, 1.0)
-
-    def _gap_tear(self, data: dict) -> np.ndarray:
-        """A short tear wherever the vocal stutters.
-
-        The moments come from ``shots.STUTTER_TIMES``, which was read off the
-        lyric once: the song writes its stutters down, and a hole in the mid
-        band turns out to find the synths dropping out rather than the voice.
-        Measured dropouts still have a say -- one landing on the same moment
-        makes the slip harder -- but they do not decide where it happens.
-
-        It is deliberately short: a stutter is a clipped syllable, not a
-        failing machine, so the slip lasts about a third of a second.
-        """
-        out = np.zeros(self.n, dtype=np.float32)
-        gaps = data.get("gaps")
-        gaps = np.asarray(gaps) if gaps is not None else np.zeros((0, 2))
-        burst = 0.30
-        nburst = max(1, int(burst * self.fps))
-        rel = np.linspace(1.0, 0.0, nburst, endpoint=False) ** 1.4
-        for t, k in SH.stutter_cues():
-            boost = 0.0
-            if len(gaps):
-                # gaps are in file time, the cue is in master time
-                near = np.abs(gaps[:, 0] - self.offset - t) < 0.18
-                if near.any():
-                    boost = float(gaps[near, 1].max()) * 0.25
-            i0 = int(t * self.fps)
-            if i0 >= self.n:
-                continue
-            j = min(self.n, i0 + nburst)
-            seg = rel[:j - i0] * min(1.0, float(k) + boost)
-            out[i0:j] = np.maximum(out[i0:j], seg)
-        return out
 
     def index(self, t: float) -> int:
         """The frame of the file that carries master time ``t``."""
@@ -437,7 +404,6 @@ class Show:
         self.flash = 0.0
         self.glitch = 0.0
         self._tint = 0.05
-        self._rough = 0.0
         self._tear_plan = None
         self._tear_hold = 0
         # Fixed by default so a dump or a preview sheet is reproducible;
@@ -486,15 +452,14 @@ class Show:
             self.onset = 1.0
         self._prev_flux = flux
         self.onset *= math.exp(-dt * 9.0)
-        # roughness, smoothed: the picture gets less stable the rougher the
-        # music is, but it is never keyed to the beat
-        rough = min(1.0, float(a.flux[i]) * 0.5 + float(a.high[i]) * 0.5)
-        self._rough += (rough - self._rough) * min(1.0, dt * 0.9)
-        target = S.tear_level(t, act)
-        if target:
-            target = min(1.0, target + 0.18 * self._rough)
-        # and a brief slip wherever the voice is cut
-        target = max(target, float(a.gap_tear[i]) if i < a.n else 0.0)
+        # When the picture comes apart is decided by `tears.py` and by nothing
+        # else.  Two things used to leak in here and both are gone: the
+        # roughness of the music (which made the same moment tear differently
+        # depending on which analysis was loaded) and the measured dropouts
+        # (which the stand-in score does not have at all, so a render with no
+        # music tore differently from a render with it).  A fault schedule
+        # that shifts with the files present is not a schedule.
+        target = TEARS.glitch(t, act)
         self.glitch += (target - self.glitch) * min(1.0, dt * 16.0)
 
         sec_i = a.section_index(t)

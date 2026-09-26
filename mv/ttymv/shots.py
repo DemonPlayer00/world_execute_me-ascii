@@ -22,6 +22,8 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import tears as TEARS
+
 from . import motifs
 
 # How a shot is bounded.  A shot ends when the *sentence* ends -- the moment
@@ -198,30 +200,15 @@ def sung_spans(tail: float = 0.35, merge: float = 0.8,
 
 #: Where the vocal stutters, as (time, strength).
 #:
-#: These were *read off the published lyric* once -- the song writes its own
-#: stutters down, and that is a far better detector than a hole in the mid
-#: band, which in this arrangement mostly finds the synths dropping out.  The
-#: three shapes counted were a word repeated inside one line, a run of three
-#: or more consecutive lines saying the same thing, and a letter run split by
-#: hyphens; strength rises with the number of repeats and jumps for a hyphen.
-#:
-#: The result is baked in rather than recomputed at run time, because the
-#: lyrics are not redistributed with this piece -- the copy in `lyrics/` has
-#: its words reduced to initials -- and a detector that reads them would
-#: quietly find nothing there and ship a *different film*, with the tears that
-#: answer a stutter simply missing.  The lyric is still the oracle: when the
-#: full text is present, `selftest.py` re-derives these numbers from it and
-#: fails if the two disagree.
-STUTTER_TIMES: tuple[tuple[float, float], ...] = (
-    (45.850, 0.58), (49.534, 0.74), (53.225, 0.58), (56.916, 0.74),
-    (71.764, 0.58), (90.197, 0.58), (97.739, 0.58), (101.474, 0.74),
-    (110.900, 1.00), (147.660, 1.00),
-    (179.929, 0.62), (183.646, 0.62), (187.665, 0.62), (191.356, 0.62),
-)
+#: Kept here as a name because the renderer and the self-test ask for
+#: "stutters"; the table itself lives in ``tears.py`` with the rest of the
+#: schedule, and is a copy of ``tears.STUTTERS`` -- assigned, not duplicated,
+#: so the two can never drift apart.
+STUTTER_TIMES: tuple[tuple[float, float], ...] = TEARS.STUTTERS
 
 
 def stutter_cues() -> list[tuple[float, float]]:
-    """Where the vocal stutters.  See ``STUTTER_TIMES``."""
+    """Where the vocal stutters.  See ``tears.STUTTERS``."""
     return list(STUTTER_TIMES)
 
 

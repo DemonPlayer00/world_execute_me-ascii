@@ -180,72 +180,20 @@ def flash_cue_at(t: float):
 
 
 # --------------------------------------------------------------------------
-# failure moments
+# failure moments, the clipped syllables and the resets
 #
-# The song has three stretches where the machine is coming apart: the illegal
-# arguments (with the verdict held over sixteen seconds of wreckage), the
-# executions, and the last one at the end.  Each entry is (seconds, intensity)
-# and every timestamp is a published lyric cue of that stretch.
-#
-# The tear answers to these rather than to the beat grid: a screen that slips
-# on every downbeat is a metronome, not a fault.
+# The whole schedule now lives in `tears.py`, deliberately: it is decided by
+# this piece's own timeline and reads nothing from outside.  These names are
+# kept so the renderer and the self-test go on saying what they mean.
 # --------------------------------------------------------------------------
 
-TEAR_EVENTS: list[tuple[float, float]] = [
-    (118.333, 0.55), (120.860, 0.90), (124.890, 1.00),
-    (125.708, 0.70), (128.661, 0.90), (131.224, 1.00),
-    (147.660, 0.85), (149.520, 0.65), (153.980, 0.70),
-    (157.040, 0.65), (161.584, 0.90),
-    (205.811, 1.00),
-]
-
-# The level each stretch never falls below, so the picture stays unstable for
-# as long as the fault lasts rather than only on the hits.
-TEAR_FLOOR = {"argument": 0.46, "execution": 0.30, "end": 0.52}
-TEAR_DECAY = 0.85          # seconds for one burst to fade
-
-
-def tear_level(t: float, act: str) -> float:
-    """How badly the picture is slipping at `t`."""
-    level = TEAR_FLOOR.get(act, 0.0)
-    for at, k in TEAR_EVENTS:
-        dt = t - at
-        if 0.0 <= dt < TEAR_DECAY:
-            level = max(level, k * (1.0 - dt / TEAR_DECAY) ** 1.5)
-    return min(1.0, level)
-
-
-# --------------------------------------------------------------------------
-# the reset
-#
-# Each long breakdown ends the same way a machine does: everything blanks for
-# a moment and comes back.  These are the only full-screen flashes in the
-# piece, and there are three of them -- one after the verdict, one after the
-# executions, one at the very end.  A flash that arrives on a beat is a strobe;
-# a flash that arrives once, when a fault clears, is a reset.
-# --------------------------------------------------------------------------
-
-RESET_EVENTS: list[tuple[float, float]] = [
-    (147.660, 1.00),      # the wreckage clears, the blade starts
-    (162.632, 0.95),      # the executions end, the last chorus begins
-    (207.481, 1.00),      # and the machine stops
-]
-RESET_ATTACK = 0.09       # how long it stays blank
-RESET_DECAY = 0.50
-
-
-def reset_level(t: float) -> float:
-    """How blanked the screen is at `t`, 0..1."""
-    for at, k in RESET_EVENTS:
-        dt = t - at
-        if dt < 0.0:
-            continue
-        if dt < RESET_ATTACK:
-            return k
-        if dt < RESET_ATTACK + RESET_DECAY:
-            u = (dt - RESET_ATTACK) / RESET_DECAY
-            return k * (1.0 - u) ** 1.7
-    return 0.0
+from .tears import (DECAY as TEAR_DECAY,                     # noqa: E402
+                    EVENTS as TEAR_EVENTS,
+                    FLOOR as TEAR_FLOOR,
+                    RESETS as RESET_EVENTS,
+                    RESET_ATTACK, RESET_DECAY,
+                    level as tear_level,
+                    reset_level)
 
 
 def act_span(t: float) -> tuple[float, float]:
