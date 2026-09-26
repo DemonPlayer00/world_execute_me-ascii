@@ -1,0 +1,22 @@
+# 分析缓存与预览产物：可再生产物，不入库
+mv/cache/
+*.pyc
+__pycache__/
+
+# 渲染出的视频：477 MB（5760x3240），一条命令即可再生（见 README 第 3.5 节）
+*.mp4
+
+# 音乐：别人的商业唱片，不入库。
+# 没有它也能跑（stand-in 模式，见 README 第 5 节）；要听真声就把文件放进来。
+world_execute(me)_-Mili-9893117-192.ogg
+*.ogg
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.opus
+# 频谱图是从那首曲子渲染出来的派生图，同样不入库（想留就删掉这行）
+*.spectrogram.png
+# 完整歌词只在本地留着（发布的 lyrics/*.lrc 已把歌词压成首字母），
+# 后缀排序在 .lrc 之后，所以加载器「第一个 *.lrc」仍然取发布的那份
+lyrics/*.lrc.full
